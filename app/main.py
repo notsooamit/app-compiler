@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -120,7 +120,7 @@ class RunCodeResponse(BaseModel):
 # ============================================================
 @app.api_route("/sandbox/{port}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def sandbox_proxy(port: int, path: str, request: Request):
-    """Proxy requests to the sandbox app running on localhost:port"""
+    """Proxy requests to the sandbox app, rewriting HTML to keep links within proxy."""
     import httpx
     client = httpx.AsyncClient(timeout=30.0)
     url = f"http://127.0.0.1:{port}/{path}"
@@ -131,7 +131,23 @@ async def sandbox_proxy(port: int, path: str, request: Request):
         headers = dict(request.headers)
         headers.pop("host", None)
         r = await client.request(request.method, url, content=body, headers=headers)
-        return HTMLResponse(r.content, status_code=r.status_code, headers=dict(r.headers))
+        content = r.content
+        content_type = r.headers.get("content-type", "")
+        # Inject <base> tag into HTML so relative links resolve through the proxy
+        if "text/html" in content_type:
+            base_tag = f'<base href="/sandbox/{port}/">'.encode()
+            content = content.replace(b"<head>", b"<head>" + base_tag, 1)
+            if base_tag not in content:
+                content = content.replace(b"<html>", b"<html><head>" + base_tag + b"</head>", 1)
+        resp_headers = dict(r.headers)
+        resp_headers.pop("content-length", None)
+        resp_headers.pop("transfer-encoding", None)
+        # Rewrite redirect Location to stay within proxy
+        if r.status_code in (301, 302, 303, 307, 308) and "location" in resp_headers:
+            loc = resp_headers["location"]
+            if loc.startswith("/"):
+                resp_headers["location"] = f"/sandbox/{port}{loc}"
+        return Response(content=content, status_code=r.status_code, headers=resp_headers)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Sandbox unreachable: {str(e)}")
 
