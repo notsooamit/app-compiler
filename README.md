@@ -36,6 +36,68 @@ Each transition represents a strict data contract. Operations will not proceed u
 
 ---
 
+## System Architecture
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        UI["Web UI<br/>index.html + app.js + style.css"]
+    end
+
+    subgraph "API Layer"
+        API["FastAPI Server<br/>main.py"]
+        RL["Rate Limiter<br/>Sliding Window"]
+    end
+
+    subgraph "Pipeline Layer"
+        ORCH["Orchestrator<br/>orchestrator.py"]
+        S1["Stage 1<br/>Intent Extraction"]
+        S2["Stage 2<br/>System Design"]
+        S3["Stage 3<br/>Schema Generation"]
+        S4["Stage 4<br/>Refinement"]
+    end
+
+    subgraph "Validation Layer"
+        VAL["7-Layer Validator<br/>validator.py"]
+        CON["Consistency Checker<br/>consistency.py"]
+        HAL["Hallucination Detector<br/>hallucination.py"]
+        REP["Repair Engine<br/>repair.py"]
+        SCH["Schema Contracts<br/>contracts.py"]
+    end
+
+    subgraph "Generation & Runtime"
+        CG["Code Generator<br/>codegen.py"]
+        CV["Code Validator<br/>generation/validator.py"]
+        SB["Sandbox<br/>runtime/sandbox.py"]
+    end
+
+    subgraph "Evaluation Layer"
+        DS["Dataset<br/>20 prompts"]
+        RUN["Runner<br/>runner.py"]
+        MET["Metrics<br/>metrics.py"]
+    end
+
+    subgraph "External Integration"
+        LLM["DeepSeek API<br/>deepseek-chat"]
+    end
+
+    UI -->|"HTTP/SSE"| API
+    API --> RL
+    API --> ORCH
+    ORCH --> S1 --> S2 --> S3 --> S4
+    S1 & S2 & S3 -->|"structured_call()"| LLM
+    S4 --> VAL
+    VAL --> CON & HAL
+    VAL --> SCH
+    S4 --> REP -->|"structured_call()"| LLM
+    API -->|"/download-code"| CG --> CV
+    API -->|"/run-code"| SB
+    API -->|"/evaluate"| RUN --> MET
+    RUN --> ORCH
+```
+
+---
+
 ## Pipeline Stages
 
 ### Stage 1: Intent Extraction
