@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="App Compiler — AI-powered multi-stage pipeline that transforms natural language into validated, executable application configurations.">
+    <title>App Compiler — AI Software Generation</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🤖 App Compiler</h1>
+            <p class="subtitle">Natural Language → Structured Config → Executable App</p>
+        </header>
+
+        <!-- Input Section -->
+        <section class="input-section">
+            <div class="input-header">
+                <h2>Describe Your App</h2>
+            </div>
+            <textarea
+                id="promptInput"
+                placeholder="Example: Build a CRM with login, contacts, deals dashboard, role-based access (admin/sales rep), and premium plan with advanced analytics..."
+                rows="4"
+                maxlength="3000"
+            ></textarea>
+            <div class="input-row">
+                <span id="charCount" class="char-count">0/3000</span>
+            </div>
+
+            <!-- API Key (required) -->
+            <div class="api-key-section">
+                <label class="api-key-label" for="apiKeyInput">🔑 DeepSeek API Key <span class="required-badge">Required</span></label>
+                <p class="api-key-hint">Enter your DeepSeek API key. It is never stored on the server. <a href="https://platform.deepseek.com/" target="_blank">Get a key →</a></p>
+                <input
+                    type="password"
+                    id="apiKeyInput"
+                    placeholder="sk-... (your DeepSeek API key)"
+                    class="api-key-input"
+                    required
+                />
+                <label class="remember-key" style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:0.8rem;color:var(--text2);cursor:pointer;">
+                    <input type="checkbox" id="rememberKey" style="accent-color:var(--accent);cursor:pointer;">
+                    Remember this key across browser sessions
+                </label>
+            </div>
+
+            <div class="example-chips">
+                <span class="chips-label">Try:</span>
+                <button class="chip" data-prompt="Build a simple todo app where users can add tasks, mark them complete, and delete them.">Todo App</button>
+                <button class="chip" data-prompt="Create a blog with posts, comments, tags, and user authentication.">Blog</button>
+                <button class="chip" data-prompt="Build a CRM with contacts, deals pipeline, dashboard, role-based access for admin and sales reps, and a premium plan with analytics.">CRM</button>
+                <button class="chip" data-prompt="Build an e-commerce store with products, cart, orders, and user accounts.">E-commerce</button>
+            </div>
+            <div class="action-row">
+                <button id="generateBtn" class="btn-primary">⚙️ Generate App Config</button>
+                <button id="downloadBtn" class="btn-secondary" disabled>📦 Download Code</button>
+                <span id="costDisplay" class="cost-display"></span>
+            </div>
+        </section>
+
+        <!-- Progress Section -->
+        <section id="progressSection" class="progress-section hidden">
+            <div class="pipeline-progress">
+                <div class="stage" data-stage="1">
+                    <div class="stage-indicator">1</div>
+                    <div class="stage-label">Intent<br>Extraction</div>
+                    <div class="stage-time"></div>
+                </div>
+                <div class="stage-connector"></div>
+                <div class="stage" data-stage="2">
+                    <div class="stage-indicator">2</div>
+                    <div class="stage-label">System<br>Design</div>
+                    <div class="stage-time"></div>
+                </div>
+                <div class="stage-connector"></div>
+                <div class="stage" data-stage="3">
+                    <div class="stage-indicator">3</div>
+                    <div class="stage-label">Schema<br>Generation</div>
+                    <div class="stage-time"></div>
+                </div>
+                <div class="stage-connector"></div>
+                <div class="stage" data-stage="4">
+                    <div class="stage-indicator">4</div>
+                    <div class="stage-label">Validation<br>& Repair</div>
+                    <div class="stage-time"></div>
+                </div>
+            </div>
+            <p id="progressMessage" class="progress-message">Ready</p>
+        </section>
+
+        <!-- Clarification Section -->
+        <section id="clarificationSection" class="clarification-section hidden">
+            <h3>🔍 Clarification Needed</h3>
+            <p>Your prompt needs more detail. Please answer these questions:</p>
+            <ul id="clarificationList"></ul>
+            <div class="clarification-actions">
+                <textarea id="clarificationResponse" placeholder="Add more details to your prompt..."></textarea>
+                <button id="clarificationRetryBtn" class="btn-primary">Continue with Clarifications</button>
+            </div>
+        </section>
+
+        <!-- Output Section -->
+        <section id="outputSection" class="output-section hidden">
+            <div class="output-header">
+                <h2>Generated Configuration</h2>
+                <div class="output-actions">
+                    <button id="copyJsonBtn" class="btn-small">📋 Copy JSON</button>
+                    <button id="downloadJsonBtn" class="btn-small">💾 Download</button>
+                </div>
+            </div>
+
+            <!-- Metrics Bar -->
+            <div class="metrics-bar">
+                <div class="metric">
+                    <span class="metric-value" id="metricLatency">--</span>
+                    <span class="metric-label">Total Latency</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value" id="metricRepairs">--</span>
+                    <span class="metric-label">Repairs Applied</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value" id="metricAssumptions">--</span>
+                    <span class="metric-label">Assumptions</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value" id="metricCost">--</span>
+                    <span class="metric-label">Est. Cost</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value" id="metricQuality">--</span>
+                    <span class="metric-label">Quality Score</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value" id="metricStatus">--</span>
+                    <span class="metric-label">Status</span>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" data-tab="all">All</button>
+                <button class="tab" data-tab="ui_schema">UI Schema</button>
+                <button class="tab" data-tab="api_schema">API Schema</button>
+                <button class="tab" data-tab="db_schema">DB Schema</button>
+                <button class="tab" data-tab="auth_schema">Auth</button>
+                <button class="tab" data-tab="business_logic">Business Logic</button>
+                <button class="tab" data-tab="repair_log">Repair Log</button>
+                <button class="tab" data-tab="assumptions_log">Assumptions</button>
+            </div>
+
+            <!-- JSON Viewer -->
+            <div class="json-viewer">
+                <pre><code id="jsonOutput"></code></pre>
+            </div>
+
+            <!-- Generated Code Section -->
+            <div id="codeSection" class="code-section hidden">
+                <h3>📁 Generated Project Code</h3>
+                <div class="code-tabs" id="codeTabs"></div>
+                <div class="code-viewer">
+                    <pre><code id="codeOutput"></code></pre>
+                </div>
+            </div>
+
+            <!-- Runtime Test Section -->
+            <div id="runtimeSection" class="runtime-section hidden">
+                <h3>🚀 Runtime Test</h3>
+                <div class="runtime-status" id="runtimeStatus">
+                    <span class="runtime-spinner hidden" id="runtimeSpinner"></span>
+                    <span class="runtime-result" id="runtimeResult"></span>
+                </div>
+                <div id="smokeTestsContainer" class="smoke-tests hidden">
+                    <h4>Smoke Tests</h4>
+                    <table class="smoke-table">
+                        <thead><tr><th>Method</th><th>Endpoint</th><th>Expected</th><th>Actual</th><th>Latency</th><th>Status</th></tr></thead>
+                        <tbody id="smokeTestsBody"></tbody>
+                    </table>
+                </div>
+                <pre id="runtimeErrors" class="runtime-errors hidden"></pre>
+            </div>
+
+            <!-- Mid-way Modification Section -->
+            <div id="modifySection" class="modify-section hidden">
+                <h3>🔄 Modify & Re-run (Mid-way Changes)</h3>
+                <p class="modify-hint">Edit the intermediate representation and restart from any pipeline stage.</p>
+                <div class="modify-controls">
+                    <label>Restart from stage:</label>
+                    <select id="modifyStage">
+                        <option value="1">Stage 1 — Intent Extraction</option>
+                        <option value="2" selected>Stage 2 — System Design</option>
+                        <option value="3">Stage 3 — Schema Generation</option>
+                        <option value="4">Stage 4 — Refinement</option>
+                    </select>
+                </div>
+                <label>Edit Architecture IR (entities, pages, endpoints, roles):</label>
+                <textarea id="modifyArchitecture" rows="12" class="modify-textarea"></textarea>
+                <button id="modifyRunBtn" class="btn-primary">🔄 Re-run from Selected Stage</button>
+                <span id="modifyStatus" class="modify-status"></span>
+            </div>
+        </section>
+
+        <!-- Error Section -->
+        <section id="errorSection" class="error-section hidden">
+            <h3>❌ Error</h3>
+            <pre id="errorOutput"></pre>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Powered by <strong>DeepSeek</strong> · Multi-stage compiler pipeline</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

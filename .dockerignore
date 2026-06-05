@@ -1,0 +1,11 @@
+.env
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.claude/
+tests/
+*.md
+benchmark_results.json
+COST_QUALITY_ANALYSIS.md
