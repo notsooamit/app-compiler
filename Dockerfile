@@ -9,9 +9,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ app/
 COPY static/ static/
 
-# Create directory for generated apps
-RUN mkdir -p /tmp/generated-apps
-
 EXPOSE 8000
 ENV PORT=8000
 

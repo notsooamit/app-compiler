@@ -2,7 +2,7 @@
 
 > **System**: AI-Powered Software Generation Compiler  
 > **Architecture Pattern**: Multi-Stage Pipeline (Compiler-Inspired)  
-> **Version**: 1.0.0  
+> **Version**: 1.1.0  
 > **Last Updated**: 2026-06-05  
 
 ---
@@ -47,14 +47,15 @@ The **App Compiler** transforms natural language app descriptions into validated
 
 | Metric | Value |
 |--------|-------|
-| Total Source Files | 26 |
-| Total Lines of Code | ~6,670 |
+| Total Source Files | 25 (19 Python + 3 static + 2 test + 1 config) |
+| Total Lines of Code | ~8,145 (Python + frontend) |
 | Pipeline Stages | 4 |
 | Validation Layers | 7 |
-| Repair Strategies | 14 |
+| Repair Strategies | 17 (14 typed + 3 fallback/layer-based) |
 | Schema Contracts | 8 JSON Schemas |
 | Evaluation Prompts | 20 (10 real + 10 edge) |
 | LLM Calls per Run | 6-12 (varies by complexity) |
+| Generated Output Files | 8+ (schema.sql, app.py, models.py, schemas.py, auth.py, business.py, requirements.txt, Dockerfile, templates/*.html) |
 
 ---
 
@@ -88,7 +89,7 @@ graph TB
     end
 
     subgraph "Generation & Runtime"
-        CG["📦 Code Generator<br/>codegen.py"]
+        CG["📦 Code Generator<br/>codegen.py (1919 LOC)"]
         CV["🧪 Code Validator<br/>generation/validator.py"]
         SB["🚀 Sandbox<br/>runtime/sandbox.py"]
     end
@@ -159,12 +160,12 @@ flowchart LR
     end
 
     subgraph "Output"
-        CODE["📦 Generated Code<br/>• schema.sql<br/>• app.py<br/>• models.py<br/>• auth.py<br/>• templates/*.html<br/>• requirements.txt"]
+        CODE["📦 Generated Code<br/>• schema.sql<br/>• app.py (FastAPI CRUD)<br/>• models.py (SQLAlchemy)<br/>• schemas.py (Pydantic)<br/>• auth.py (JWT)<br/>• business.py<br/>• templates/*.html<br/>• requirements.txt<br/>• Dockerfile"]
     end
 
     NL -->|"LLM Parse"| IR1
     IR1 -->|"LLM Design"| IR2
-    IR2 -->|"LLM Generate<br/>(5 parallel)"| CFG
+    IR2 -->|"LLM Generate<br/>(3 parallel workers)"| CFG
     CFG --- UI_S & API_S & DB_S & AUTH_S & BL_S
     CFG -->|"Validate + Repair<br/>(max 3 passes)"| FINAL
     FINAL -->|"Code Gen"| CODE
@@ -212,12 +213,13 @@ graph TD
     sandbox["sandbox.py<br/>Runtime Environment"]
     
     runner["runner.py<br/>Benchmark"]
-    metrics["metrics.py<br/>Metrics"]
+    metrics["metrics.py<br/>Metrics + Quality Scoring"]
     dataset["dataset.py<br/>20 Prompts"]
     
     main --> orch & codegen & codeval & sandbox & runner
     main --> config
     orch --> intent & design & schema & refine
+    orch --> metrics
     intent & design --> llm
     schema --> llm & contracts
     refine --> validator & repair
@@ -276,10 +278,10 @@ sequenceDiagram
     
     Note over Orch: Stage 3: Schema Generation (Parallel)
     Orch->>S3: run(architecture_ir, parallel=true)
-    par Generate 5 schemas in parallel
+    par Generate 3 parallel workers
         S3->>LLM: DB Schema
         S3->>LLM: API Schema
-        S3->>LLM: UI Schema + Auth + Business Logic
+        S3->>LLM: UI + Auth + Business Logic
     end
     LLM-->>S3: 5 sub-schema JSONs
     S3-->>Orch: Complete Config
@@ -321,6 +323,7 @@ sequenceDiagram
     R->>V: validate_config(config)
     V-->>R: errors[12 issues]
     
+    Note over R: Deduplicate errors via MD5 hash
     Note over R: Filter: skip already-attempted errors
     
     R->>RE: repair(api_field_not_in_db)
@@ -329,11 +332,11 @@ sequenceDiagram
     RE-->>R: ✅ fixed
 
     R->>RE: repair(hallucinated_table)
-    Note over RE: No LLM needed — surgical removal
-    RE-->>R: ✅ fixed (cascade cleanup)
+    Note over RE: No LLM needed — surgical removal + cascade cleanup
+    RE-->>R: ✅ fixed (cascade: relations, FK cols, endpoints, rules)
 
     R->>RE: repair(auth_missing_matrix)
-    Note over RE: Heuristic: admin→full, viewer→read
+    Note over RE: Heuristic: admin→full CRUD, viewer→read+list
     RE-->>R: ✅ fixed
 
     R->>RE: repair(circular_fk)
@@ -343,8 +346,8 @@ sequenceDiagram
     R->>V: validate_config(config)
     V-->>R: errors[3 remaining]
     Note over R: All 3 already attempted → stop
-    Note over R: Check if remaining are cosmetic-only
-    R->>R: validation_status = "clean"
+    Note over R: Check: are remaining errors only warnings?
+    R->>R: validation_status = "clean" (if only cosmetic)
 ```
 
 ---
@@ -392,7 +395,7 @@ stateDiagram-v2
     unknown --> repairing: Errors found
     
     repairing --> clean: All errors fixed
-    repairing --> clean: Only cosmetic errors remain
+    repairing --> clean: Only cosmetic errors remain (warnings only)
     repairing --> has_unresolved: Blocking errors unfixable
     repairing --> max_passes_exhausted: 3 passes done, still blocking
     
@@ -409,32 +412,40 @@ stateDiagram-v2
 
     CheckErrorType --> AddColumn: api_field_not_in_db
     CheckErrorType --> GenerateEndpoint: ui_binding_no_api
-    CheckErrorType --> RemoveHallucinated: hallucinated_*
-    CheckErrorType --> FixAuth: auth_*
+    CheckErrorType --> RemoveHallucinated: hallucinated_table/endpoint/role/rule
+    CheckErrorType --> FixAuth: auth_no_roles / auth_unknown_roles / auth_missing_matrix
+    CheckErrorType --> RemoveExtraMatrix: auth_extra_matrix_entries
     CheckErrorType --> CoerceType: invalid_sql_type
     CheckErrorType --> RemoveFK: broken_fk_reference
     CheckErrorType --> GenerateTable: missing_db_table
     CheckErrorType --> FuzzyMatch: api_unknown_entity
     CheckErrorType --> Deduplicate: duplicate_endpoint
-    CheckErrorType --> Unresolvable: circular_fk / no_roles
+    CheckErrorType --> FixBrokenRef: rule_unknown_entity
+    CheckErrorType --> Unresolvable: circular_fk / no_roles / invalid_http_method
     CheckErrorType --> FallbackByLayer: unknown error_type
 
     AddColumn --> LLMCall: Generate column def
     GenerateEndpoint --> LLMCall: Generate endpoint
-    GenerateTable --> LLMCall: Generate full table
-    RemoveHallucinated --> SurgicalRemove: Cascade cleanup
+    GenerateTable --> LLMCall: Generate full table + relations
+    RemoveHallucinated --> SurgicalRemove: Cascade cleanup (table→relations→FKs→endpoints→rules)
     FixAuth --> HeuristicFix: Role-based defaults
-    FuzzyMatch --> NormMatch: Try _entity_matches_table
+    RemoveExtraMatrix --> SurgicalRemove: Remove orphaned matrix entries
+    FuzzyMatch --> NormMatch: Try _entity_matches_table (PascalCase→snake_case)
+    FixBrokenRef --> SurgicalRemove: Remove broken entity from rule
     
     LLMCall --> Fixed: Parse + inject
     SurgicalRemove --> Fixed
     HeuristicFix --> Fixed
     NormMatch --> Fixed: Match found
     NormMatch --> RemoveRef: No match
+    FallbackByLayer --> TypeRepair: type_safety layer
+    FallbackByLayer --> RefRepair: reference_integrity layer
+    FallbackByLayer --> NeedsRegen: required_fields layer
     
     Fixed --> [*]: result = "fixed"
     Unresolvable --> [*]: result = "unresolvable"
     RemoveRef --> [*]: result = "fixed" (degraded)
+    NeedsRegen --> [*]: result = "unresolvable"
 ```
 
 ---
@@ -471,6 +482,7 @@ classDiagram
     
     class RepairEngine {
         +repair(error, config, arch, key) dict
+        -strategy_map: dict[str, Callable]
         -_repair_api_field_not_in_db()
         -_repair_ui_binding_no_api()
         -_repair_hallucinated()
@@ -492,8 +504,36 @@ classDiagram
         +record_run(prompt_id, category, prompt, result)
         +compute_summary() dict
         +by_category() dict
+        +generate_cost_quality_report() str
         +export_json(filepath)
         -_classify_failure(run) str
+        -_compute_quality_score(run) dict
+        -_compute_cost_efficiency(run) dict
+    }
+    
+    class RuntimeResult {
+        +success: bool
+        +port: int
+        +base_url: str
+        +startup_latency_seconds: float
+        +smoke_tests: List~SmokeTestResult~
+        +smoke_tests_passed: int
+        +smoke_tests_failed: int
+        +process_stdout: str
+        +process_stderr: str
+        +errors: List~str~
+        +temp_dir: str
+        +to_dict() dict
+    }
+    
+    class SmokeTestResult {
+        +endpoint: str
+        +method: str
+        +expected_status: int
+        +actual_status: int
+        +passed: bool
+        +error: str
+        +latency_ms: float
     }
     
     class GenerateRequest {
@@ -514,6 +554,7 @@ classDiagram
     
     PipelineOrchestrator *-- PipelineState
     PipelineOrchestrator ..> RepairEngine : uses via refinement
+    RuntimeResult *-- SmokeTestResult
 ```
 
 ---
@@ -525,30 +566,30 @@ classDiagram
 ```mermaid
 graph TB
     subgraph "app/"
-        main["main.py<br/>350 LOC"]
-        config["config.py<br/>40 LOC"]
+        main["main.py<br/>355 LOC"]
+        config["config.py<br/>42 LOC"]
         init["__init__.py"]
     end
 
     subgraph "app/pipeline/"
-        orch["orchestrator.py<br/>222 LOC"]
+        orch["orchestrator.py<br/>230 LOC"]
         intent["intent.py<br/>45 LOC"]
         design["design.py<br/>46 LOC"]
-        schema_mod["schema.py<br/>188 LOC"]
-        refine["refinement.py<br/>101 LOC"]
-        llm["llm.py<br/>371 LOC"]
+        schema_mod["schema.py<br/>192 LOC"]
+        refine["refinement.py<br/>103 LOC"]
+        llm["llm.py<br/>389 LOC"]
     end
 
     subgraph "app/validation/"
-        validator["validator.py<br/>298 LOC"]
-        contracts["contracts.py<br/>587 LOC"]
-        consistency["consistency.py<br/>424 LOC"]
+        validator["validator.py<br/>302 LOC"]
+        contracts["contracts.py<br/>600 LOC"]
+        consistency["consistency.py<br/>437 LOC"]
         hallucination["hallucination.py<br/>117 LOC"]
-        repair["repair.py<br/>515 LOC"]
+        repair["repair.py<br/>516 LOC"]
     end
 
     subgraph "app/generation/"
-        codegen["codegen.py<br/>1914 LOC"]
+        codegen["codegen.py<br/>1919 LOC"]
         codeval["validator.py<br/>94 LOC"]
     end
 
@@ -557,15 +598,20 @@ graph TB
     end
 
     subgraph "app/evaluation/"
-        dataset["dataset.py<br/>207 LOC"]
-        runner["runner.py<br/>109 LOC"]
+        dataset["dataset.py<br/>195 LOC"]
+        runner["runner.py<br/>123 LOC"]
         metrics["metrics.py<br/>432 LOC"]
     end
 
     subgraph "static/"
-        html["index.html"]
-        css["style.css"]
-        js["app.js"]
+        html["index.html<br/>222 LOC"]
+        css["style.css<br/>728 LOC"]
+        js["app.js<br/>618 LOC"]
+    end
+
+    subgraph "tests/"
+        test_core["test_core.py"]
+        test_int["test_integration.py"]
     end
 
     style main fill:#3b82f6,color:#fff
@@ -573,21 +619,23 @@ graph TB
     style contracts fill:#f97316,color:#fff
     style repair fill:#ef4444,color:#fff
     style validator fill:#eab308,color:#000
+    style codegen fill:#a855f7,color:#fff
 ```
 
 ### 8.2 Lines of Code Distribution
 
 | Package | Files | LOC | % of Total |
 |---------|-------|-----|------------|
-| `app/pipeline/` | 6 | 1,066 | 16.0% |
-| `app/validation/` | 5 | 1,972 | 29.5% |
-| `app/generation/` | 2 | 2,010 | 30.1% |
-| `app/evaluation/` | 3 | 748 | 11.2% |
-| `app/runtime/` | 2 | 438 | 6.6% |
-| `app/` (root) | 3 | 440 | 6.6% |
-| **Total** | **21** | **~6,674** | **100%** |
+| `app/pipeline/` | 7 | 1,005 | 12.3% |
+| `app/validation/` | 5 | 1,972 | 24.2% |
+| `app/generation/` | 2 | 2,013 | 24.7% |
+| `app/evaluation/` | 3 | 750 | 9.2% |
+| `app/runtime/` | 2 | 438 | 5.4% |
+| `app/` (root) | 3 | 397 | 4.9% |
+| `static/` | 3 | 1,568 | 19.2% |
+| **Total** | **25** | **~8,143** | **100%** |
 
-> The **generation and validation layers are the largest components**, reflecting the system's emphasis on comprehensive code output and correctness.
+> The **code generator (`codegen.py` at 1,919 LOC) is the single largest file**, followed by the **validation subsystem** (`contracts.py` + `repair.py` + `consistency.py` + `validator.py` = 1,855 LOC). Together, generation and validation account for ~49% of the codebase, reflecting the system's emphasis on comprehensive code output and correctness.
 
 ---
 
@@ -600,12 +648,12 @@ flowchart TB
     CONFIG["📋 Complete Config"]
     
     CONFIG --> L1["Layer 1: JSON Validity<br/>Can config be serialized?"]
-    L1 --> L2["Layer 2: Required Fields<br/>All mandatory fields present?"]
-    L2 --> L3["Layer 3: Type Safety<br/>All values match expected types?<br/>SQL types valid?"]
-    L3 --> L4["Layer 4: Reference Integrity<br/>All FKs point to real tables?<br/>All API entities exist?"]
-    L4 --> L5["Layer 5: Cross-Layer Consistency<br/>API↔DB fields match?<br/>UI↔API bindings valid?<br/>Auth↔API roles covered?"]
-    L5 --> L6["Layer 6: Logical Consistency<br/>No circular FKs?<br/>No duplicate endpoints?"]
-    L6 --> L7["Layer 7: Hallucination Detection<br/>All tables in Architecture IR?<br/>All endpoints in Architecture IR?"]
+    L1 --> L2["Layer 2: Required Fields<br/>All mandatory fields present?<br/>(metadata, db_schema, api_schema, ui_schema, auth_schema, business_logic)"]
+    L2 --> L3["Layer 3: Type Safety<br/>All values match expected types?<br/>SQL types valid? (VALID_SQL_TYPES set)"]
+    L3 --> L4["Layer 4: Reference Integrity<br/>All FKs point to real tables?<br/>All API entities exist?<br/>Circular FK detection"]
+    L4 --> L5["Layer 5: Cross-Layer Consistency<br/>Rule 0: Dangling resources (API entity→DB table)<br/>Rule 1: API response fields↔DB columns<br/>Rule 2: UI data_bindings→API endpoints<br/>Rule 3: Auth roles on protected endpoints<br/>Rule 4: Business rule entity references<br/>Rule 5: Orphan DB tables"]
+    L5 --> L6["Layer 6: Logical Consistency<br/>No duplicate endpoints?<br/>Auth roles defined + matrix coverage?"]
+    L6 --> L7["Layer 7: Hallucination Detection<br/>All tables in Architecture IR?<br/>All endpoints in Architecture IR?<br/>(uses fuzzy path matching)"]
     
     L7 --> RESULT{"Errors?"}
     RESULT -->|"0 errors"| CLEAN["✅ CLEAN"]
@@ -622,7 +670,14 @@ flowchart TB
     style REPAIR fill:#ef4444,color:#fff
 ```
 
-### 9.2 Cross-Layer Consistency Checks (Layer 5)
+### 9.2 Cross-Layer Consistency Checks (Layer 5 — `consistency.py`)
+
+The consistency checker implements 6 rules with advanced name normalization:
+
+- **`_camel_to_snake()`**: Converts `CartItem` → `cart_item` for cross-layer matching
+- **`_entity_matches_table()`** / **`_entity_matches_any_table()`**: Handles singular/plural (`categories` ↔ `category`), PascalCase→snake_case, and prefix matching
+- **`NON_TABLE_PATH_SEGMENTS`**: Frozenset of 26 path segments that are actions, not resources (e.g., `login`, `search`, `dashboard`)
+- **`action_verbs`**: Set of 30+ verbs excluded from resource checks for non-GET endpoints
 
 ```mermaid
 graph LR
@@ -653,13 +708,13 @@ graph LR
         FG["feature_gates[]"]
     end
 
-    E1 -->|"entity must exist"| T1
-    RS -->|"fields must match"| C1
-    DB -->|"must reference"| E1
-    E1 -->|"roles must exist"| RO
-    RO -->|"must have entry"| AM
-    BR -->|"entities must exist"| T1
-    T1 -->|"should have endpoints"| E1
+    E1 -->|"Rule 0: entity must exist"| T1
+    RS -->|"Rule 1: fields must match"| C1
+    DB -->|"Rule 2: must reference"| E1
+    E1 -->|"Rule 3: roles must exist"| RO
+    RO -->|"Rule 6: must have entry"| AM
+    BR -->|"Rule 4: entities must exist"| T1
+    T1 -->|"Rule 5: should have endpoints"| E1
 
     style T1 fill:#3b82f6,color:#fff
     style E1 fill:#8b5cf6,color:#fff
@@ -671,6 +726,33 @@ graph LR
 ---
 
 ## 10. Repair Engine Strategy Pattern
+
+The `RepairEngine` class (in `repair.py`) uses a **strategy map** pattern. Each error type dispatches to a specific handler. Handlers are categorized by whether they require LLM calls:
+
+### LLM-Required Repairs (3)
+- `api_field_not_in_db` → Calls LLM to generate a DB column definition matching `FIELD_SCHEMA`
+- `ui_binding_no_api` → Calls LLM to generate a full API endpoint matching `API_ENDPOINT_SCHEMA`
+- `missing_db_table` → Calls LLM to generate complete table with columns + relations from Architecture IR entity
+
+### Local/Heuristic Repairs (11)
+- `hallucinated_table` → Cascade removal: table → relations → FK columns → API endpoints → business rules
+- `hallucinated_endpoint` → Direct endpoint removal
+- `hallucinated_role` → Role removal + access_matrix cleanup
+- `hallucinated_rule` → Rule removal
+- `auth_no_roles` → Assigns all defined roles (or `["user"]` default) to unprotected endpoint
+- `auth_unknown_roles` → Creates missing roles with `read` default permissions
+- `auth_missing_matrix` → Generates matrix entries with role-aware heuristics (`admin`→full CRUD, `viewer`→read+list)
+- `auth_extra_matrix_entries` → Removes orphaned matrix entries
+- `invalid_sql_type` / `type_safety` → Coerces to `VARCHAR`
+- `broken_fk_reference` → Removes FK annotation
+- `api_unknown_entity` → Fuzzy match via `_entity_matches_table()`, fallback: remove entity ref
+- `duplicate_endpoint` → Deduplicates by `(method, path)` key, keeps first occurrence
+- `rule_unknown_entity` → Removes broken entity from rule's `entities_involved[]`
+
+### Unresolvable (3)
+- `circular_fk` → Needs schema redesign
+- `no_roles_defined` → Needs regeneration
+- `invalid_http_method` → Needs regeneration
 
 ```mermaid
 graph TD
@@ -687,15 +769,16 @@ graph TD
     DISPATCH --> S7["auth_missing_matrix<br/>→ Generate matrix entries"]
     DISPATCH --> S8["invalid_sql_type<br/>→ Coerce to VARCHAR"]
     DISPATCH --> S9["broken_fk_reference<br/>→ Remove FK"]
-    DISPATCH --> S10["missing_db_table<br/>→ LLM generates table"]
+    DISPATCH --> S10["missing_db_table<br/>→ LLM generates table + relations"]
     DISPATCH --> S11["api_unknown_entity<br/>→ Fuzzy match or remove"]
     DISPATCH --> S12["duplicate_endpoint<br/>→ Deduplicate"]
-    DISPATCH --> S13["circular_fk<br/>→ Unresolvable"]
-    DISPATCH --> S14["Fallback by layer"]
+    DISPATCH --> S13["auth_extra_matrix_entries<br/>→ Remove orphaned entries"]
+    DISPATCH --> S14["circular_fk<br/>→ Unresolvable"]
+    DISPATCH --> S15["Fallback by layer"]
 
     S1 & S2 & S10 --> LLM_CALL["🤖 LLM Call<br/>structured_call()"]
-    S3 & S4 & S5 & S6 & S7 & S8 & S9 & S11 & S12 --> LOCAL["⚡ Local Fix<br/>No LLM needed"]
-    S13 --> SKIP["⏭️ Skip<br/>Needs redesign"]
+    S3 & S4 & S5 & S6 & S7 & S8 & S9 & S11 & S12 & S13 --> LOCAL["⚡ Local Fix<br/>No LLM needed"]
+    S14 --> SKIP["⏭️ Skip<br/>Needs redesign"]
 
     LLM_CALL --> FIXED["✅ Fixed"]
     LOCAL --> FIXED
@@ -873,7 +956,7 @@ graph TB
     subgraph "ThreadPoolExecutor(max_workers=3)"
         W1["Worker 1: DB Schema"]
         W2["Worker 2: API Schema"]
-        W3["Worker 3: UI + Auth + BL"]
+        W3["Worker 3: UI + Auth + Business Logic"]
     end
     
     subgraph "Thread-Safe Resources"
@@ -908,11 +991,23 @@ graph TB
 | Mechanism | Where | Purpose |
 |-----------|-------|---------|
 | `asyncio.to_thread()` | Orchestrator → each stage | Non-blocking LLM calls |
-| `ThreadPoolExecutor(3)` | Stage 3 sub-schemas | Parallel schema generation |
-| `threading.Lock` | `_clients` cache | Thread-safe client reuse |
-| `contextvars.ContextVar` | Token tracking | Request-isolated counters |
-| `asyncio.Queue` | SSE streaming | Progress event delivery |
-| `asyncio.Lock` | Rate limiter | Async-safe bucket access |
+| `ThreadPoolExecutor(3)` | Stage 3: `_generate_subschemas()` | 3 parallel LLM calls for sub-schema generation |
+| `threading.Lock` | `_clients` cache in `llm.py` | Thread-safe OpenAI client reuse |
+| `contextvars.ContextVar` | `_token_usage` in `llm.py` | Request-isolated token counters |
+| `asyncio.Queue` | SSE streaming in `orchestrator.py` | Progress event delivery to frontend |
+| `asyncio.Lock` | Rate limiter in `main.py` | Async-safe sliding window bucket access |
+
+### Stage 3 Parallelism Detail
+
+Stage 3 (`schema.py`) splits the Architecture IR into **5 sub-schema generation tasks** but uses only **3 workers** (`ThreadPoolExecutor(max_workers=3)`):
+
+| Worker | Sub-schemas Generated |
+|--------|----------------------|
+| Worker 1 | `db_schema` (tables, columns, relations, indexes) |
+| Worker 2 | `api_schema` (endpoints, middleware) |
+| Worker 3 | `ui_schema` + `auth_schema` + `business_logic` (combined) |
+
+Each sub-schema uses its own contract from `contracts.py` for validation. Results are merged via `_merge_results()` with a `_normalize_json()` cleanup pass.
 
 ---
 
@@ -933,6 +1028,7 @@ graph LR
 
     subgraph "Output Endpoints"
         POST_DL["POST /download-code<br/>Generate + ZIP"]
+        POST_RUN["POST /run-code<br/>Sandbox execution"]
     end
 
     subgraph "Evaluation Endpoints"
@@ -948,14 +1044,14 @@ graph LR
 
 | Endpoint | Method | Rate Limited | Auth | Response |
 |----------|--------|-------------|------|----------|
-| `/` | GET | ❌ | ❌ | HTML |
+| `/` | GET | ❌ | ❌ | HTML (serves `static/index.html`) |
 | `/generate` | POST | ✅ | Optional API key | JSON |
 | `/generate-stream` | POST | ✅ | Optional API key | SSE stream |
 | `/modify` | POST | ✅ | Optional API key | JSON |
-| `/download-code` | POST | ❌ | ❌ | ZIP file |
-| `/run-code` | POST | ❌ | ❌ | JSON |
-| `/evaluate` | POST | ✅ | ❌ | JSON |
-| `/api/cost` | GET | ❌ | ❌ | JSON |
+| `/download-code` | POST | ❌ | ❌ | ZIP file (in-memory via `io.BytesIO`) |
+| `/run-code` | POST | ❌ | ❌ | JSON (sandbox result with smoke tests) |
+| `/evaluate` | POST | ✅ | ❌ | JSON (benchmark results) |
+| `/api/cost` | GET | ❌ | ❌ | JSON (token usage + estimated cost) |
 
 ---
 
@@ -1001,21 +1097,35 @@ mindmap
 | Pattern | Where | Implementation |
 |---------|-------|----------------|
 | **Pipeline** | `orchestrator.py` | 4 sequential stages, each producing an IR |
-| **Strategy** | `repair.py` | `strategy_map` dict dispatches to 14 repair handlers |
+| **Strategy** | `repair.py` | `strategy_map` dict dispatches to 17 repair handlers (14 typed + 3 lambda unresolvable) |
 | **Chain of Responsibility** | `validator.py` | 7 validation layers, each adds errors independently |
-| **Observer** | `orchestrator.py` | `progress_callback` notifies UI of stage transitions |
-| **Factory** | `llm.py` | `_get_client()` creates/caches OpenAI clients per key |
-| **Adapter** | `llm.py` | `_parse_json_robust()` 8-attempt JSON recovery |
+| **Observer** | `orchestrator.py` | `progress_callback` notifies UI of stage transitions via `asyncio.Queue` |
+| **Factory** | `llm.py` | `_get_client()` creates/caches OpenAI clients per key with `threading.Lock` |
+| **Adapter** | `llm.py` | `_parse_json_robust()` 8-strategy JSON recovery from LLM output |
 | **Facade** | `orchestrator.py` | Single `run()` method hides 4-stage complexity |
-| **Template Method** | `schema.py` | `_generate_subschema()` called 5× with different schemas |
-| **Null Object** | `llm.py` | `_normalize_llm_nulls()` replaces null→[] |
-| **Schema-First** | `contracts.py` | 8 JSON Schemas are the source of truth |
+| **Template Method** | `schema.py` | `_generate_subschema()` called 5× with different schemas via `ThreadPoolExecutor` |
+| **Null Object** | `llm.py` | `_normalize_llm_nulls()` replaces null→[] for arrays, null→{} for objects |
+| **Schema-First** | `contracts.py` | 8 JSON Schemas are the source of truth for all validation |
+| **Dataclass** | `sandbox.py` | `RuntimeResult` and `SmokeTestResult` as structured result containers |
 
 ---
 
 ## 15. Software Engineering Metrics
 
-### 15.1 Evaluation Metrics Tracked
+### 15.1 Quality Score System
+
+The system computes a **composite quality score** (0-100) for each pipeline run using 6 weighted dimensions:
+
+| Dimension | Weight | Measures |
+|-----------|--------|----------|
+| `schema_completeness` | 0.20 | Presence of all 6 expected config keys |
+| `validation_pass_rate` | 0.25 | Clean=100, unresolved=50, max_passes=30, else=0 |
+| `repair_effectiveness` | 0.15 | Clean with repairs=50+10×count, clean without=100, else=30-5×count |
+| `code_executability` | 0.25 | Clean=100, unresolved=50, else=0 |
+| `clarity_detection` | 0.10 | Correctly identifies vague/incomplete prompts |
+| `conflict_detection` | 0.05 | Correctly flags contradictory requirements |
+
+### 15.2 Evaluation Metrics Tracked
 
 ```mermaid
 pie title "Evaluation Metric Categories"
@@ -1028,15 +1138,16 @@ pie title "Evaluation Metric Categories"
 ```
 
 | Metric | Formula | What It Measures |
-|--------|---------|-----------------|
+|--------|---------|-----------------| 
 | **Success Rate** | `successful / total × 100` | End-to-end pipeline completion |
 | **Executability Rate** | `clean_configs / total × 100` | Configs that pass all 7 validation layers |
 | **Avg Latency** | `Σ(latency) / count` | Mean wall-clock time per request |
 | **Avg Repairs/Request** | `Σ(repairs) / total` | Self-healing efficiency |
 | **Cost per Request** | `Σ(cost) / total` | DeepSeek API cost efficiency |
+| **Cost per Quality Point** | `cost / max(quality, 1)` | Cost-effectiveness |
 | **Failure Distribution** | Count per failure type | Root cause categorization |
 
-### 15.2 Failure Type Taxonomy
+### 15.3 Failure Type Taxonomy
 
 ```mermaid
 graph TD
@@ -1054,16 +1165,16 @@ graph TD
     style UK fill:#6b7280,color:#fff
 ```
 
-### 15.3 Code Quality Metrics
+### 15.4 Code Quality Metrics
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
 | **Coupling** | Low | Modules communicate via dict IRs, not direct imports |
 | **Cohesion** | High | Each module has a single, clear responsibility |
-| **Cyclomatic Complexity** | Medium | Highest in `consistency.py` (multiple cross-checks) |
-| **Test Coverage** | Structural | `tests/` directory exists; evaluation suite provides integration testing |
-| **Schema Coverage** | 100% | Every pipeline stage has a JSON Schema contract |
-| **Error Recovery** | 14 strategies | Repair engine covers all known error types |
+| **Cyclomatic Complexity** | Medium | Highest in `codegen.py` (template generation) and `consistency.py` (6 cross-checks) |
+| **Test Coverage** | Structural | `tests/test_core.py` + `tests/test_integration.py`; evaluation suite provides integration testing |
+| **Schema Coverage** | 100% | Every pipeline stage has a JSON Schema contract (8 total in `contracts.py`) |
+| **Error Recovery** | 17 strategies | Repair engine covers all known error types with 3 fallback paths |
 
 ---
 
@@ -1072,7 +1183,7 @@ graph TD
 ```mermaid
 graph TB
     subgraph "Input Validation"
-        RL["Rate Limiter<br/>5 req/60s per IP"]
+        RL["Rate Limiter<br/>5 req/60s per IP<br/>asyncio.Lock + sliding window"]
         ML["Max Prompt Length<br/>3000 chars"]
         PV["Pydantic Models<br/>Type validation"]
     end
@@ -1084,14 +1195,14 @@ graph TB
     end
 
     subgraph "Output Security"
-        JWT["JWT Secret<br/>env var + random fallback"]
+        JWT["JWT Secret<br/>env var + cryptographic random fallback<br/>(secrets.token_hex(32))"]
         SAN["Filename Sanitization<br/>ZIP download names"]
         CORS["CORS<br/>Wildcard origins, no credentials"]
     end
 
     subgraph "Code Gen Security"
         AST["Python AST Validation<br/>Syntax correctness"]
-        SQL["SQLite Validation<br/>SQL correctness"]
+        SQL["SQLite Validation<br/>Single shared connection<br/>for FK resolution"]
         HTML["HTML Structure Check<br/>DOCTYPE + closing tags"]
     end
 
@@ -1100,35 +1211,44 @@ graph TB
     style JWT fill:#eab308,color:#000
 ```
 
+### Rate Limiter Implementation
+
+The rate limiter in `main.py` uses a **sliding window** algorithm:
+
+- **5 requests** per **60 seconds** per IP address
+- Cleanup of stale entries every **300 seconds** via `asyncio.create_task()`
+- Protected by `asyncio.Lock` for concurrent access safety
+- Returns HTTP `429` with retry guidance
+
 ---
 
 ## 17. Error Handling Strategy
 
 ```mermaid
 graph TB
-    subgraph "LLM Layer"
+    subgraph "LLM Layer (llm.py)"
         LLM_E["API errors"]
-        LLM_E --> RETRY["Retry with backoff<br/>3 attempts, +0.05 temp"]
+        LLM_E --> RETRY["Retry with backoff<br/>3 attempts, +0.05 temp per retry"]
         RETRY --> PARSE["JSON parse failure"]
-        PARSE --> RECOVER["8-attempt recovery<br/>regex fix, truncation repair,<br/>progressive prefix search"]
+        PARSE --> RECOVER["8-strategy recovery:<br/>1. Direct JSON parse<br/>2. Regex extract {...}<br/>3. First complete object<br/>4. Truncated JSON repair<br/>5. Progressive prefix search<br/>6. tool_calls extraction<br/>7. Content block extraction<br/>8. Fallback empty object"]
     end
 
-    subgraph "Pipeline Layer"
+    subgraph "Pipeline Layer (orchestrator.py)"
         P_E["Stage failure"]
         P_E --> CATCH["try/except in Orchestrator"]
         CATCH --> STATE["Error stored in PipelineState"]
         STATE --> PARTIAL["Return partial results<br/>+ error details + traceback"]
     end
 
-    subgraph "Validation Layer"
+    subgraph "Validation Layer (refinement.py)"
         V_E["Validation errors"]
-        V_E --> DEDUP["Deduplicate by MD5 hash"]
+        V_E --> DEDUP["Deduplicate by MD5 hash<br/>(hashlib.md5 of error message)"]
         DEDUP --> REPAIR["Dispatch to RepairEngine"]
-        REPAIR --> LOG["Log to repair_log[]"]
+        REPAIR --> LOG["Log to repair_log[]<br/>(error + strategy + result + detail)"]
         LOG --> REVALIDATE["Re-validate (max 3 passes)"]
     end
 
-    subgraph "API Layer"
+    subgraph "API Layer (main.py)"
         A_E["Request errors"]
         A_E --> RATE["429: Rate limit exceeded"]
         A_E --> VAL["422: Validation error (Pydantic)"]
@@ -1139,6 +1259,19 @@ graph TB
     style RECOVER fill:#8b5cf6,color:#fff
     style REPAIR fill:#ef4444,color:#fff
 ```
+
+### LLM JSON Recovery Pipeline (`_parse_json_robust`)
+
+The `llm.py` module implements an 8-strategy cascade for recovering valid JSON from LLM output:
+
+1. **Direct parse** — `json.loads()` on raw text
+2. **Regex extract** — Find `{...}` or `[...]` blocks via regex
+3. **First complete object** — Scan character-by-character for balanced braces
+4. **Truncated repair** — Fix common truncation: add missing `]}` closers
+5. **Progressive prefix search** — Try parsing increasingly smaller prefixes
+6. **Tool call extraction** — Extract from OpenAI function_call response format
+7. **Content block extraction** — Extract from markdown code blocks (````json`)
+8. **Fallback empty object** — Return `{}` as last resort
 
 ---
 
@@ -1177,16 +1310,59 @@ graph TB
     style DEEPSEEK fill:#22c55e,color:#fff
 ```
 
+### Runtime Sandbox Architecture
+
+The sandbox (`runtime/sandbox.py`) provides end-to-end executability verification:
+
+1. **File deployment** — Writes all generated files to a `tempfile.mkdtemp()` directory
+2. **Dependency install** — `pip install --target lib/ -r requirements.txt` via `asyncio.to_thread()`
+3. **Database init** — Executes `schema.sql` against SQLite in-memory
+4. **App launch** — Spawns `subprocess.Popen([python, app.py])` with isolated `PYTHONPATH` and `DATABASE_URL`
+5. **Health check** — Polls `GET /docs` every 0.5s via `urllib.request` until 200 or timeout (default 60s)
+6. **Smoke tests** — Tests up to 10 API endpoints (skipping auth routes), accepts any 2xx-4xx as pass
+7. **Keep-alive** — Optionally keeps app running for `keep_alive` seconds (default 300s) for user interaction
+8. **Cleanup** — `asyncio.create_task(_delayed_cleanup)` kills process and removes temp dir
+
 ### Dependencies
 
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `fastapi` | 0.115.6 | Web framework |
 | `uvicorn` | 0.34.0 | ASGI server |
-| `openai` | 1.68.0 | DeepSeek API client |
+| `openai` | 1.68.0 | DeepSeek API client (OpenAI-compatible) |
 | `pydantic` | ≥2.5.0 | Request/response validation |
 | `python-dotenv` | 1.0.1 | Environment variables |
 | `jsonschema` | 4.23.0 | Schema validation |
+
+---
+
+## 19. Code Generator Architecture
+
+The code generator (`codegen.py`, 1,919 LOC) is the largest single module. It transforms a validated config into 8+ runnable files:
+
+### Generated Files
+
+| File | Generator Function | Description |
+|------|-------------------|-------------|
+| `schema.sql` | `_generate_sql()` | SQLite DDL with FK constraints + junction tables |
+| `models.py` | `_generate_models()` | SQLAlchemy ORM models with relationships (belongs_to, has_many, has_one, many_to_many) |
+| `app.py` | `_generate_app()` | FastAPI application with CRUD routes, seed data, server-rendered HTML pages |
+| `schemas.py` | `_generate_schemas()` | Pydantic BaseModel schemas (Create/Update/Response per table) |
+| `auth.py` | `_generate_auth()` | JWT authentication with role-based access control |
+| `business.py` | `_generate_business_logic()` | Business rule validators with entity→action dispatch |
+| `requirements.txt` | `_generate_requirements()` | Python dependencies with minimum versions |
+| `Dockerfile` | `_generate_dockerfile()` | Container config (Python 3.12-slim) |
+| `templates/*.html` | `_generate_page_template()` | Bootstrap-based templates with data-binding JS |
+
+### Key Code Generation Features
+
+- **FK derivation** (`_derive_fk_from_relations()`): Ensures FK columns exist for all relations before SQL generation
+- **Entity matching** (`_match_entity_to_table()`): PascalCase→snake_case + singular/plural normalization
+- **PK type inference** (`_infer_pk_type_for_entity()`): Routes use `str` params for UUID/VARCHAR PKs, `int` for INTEGER
+- **Server-rendered pages** (`_build_server_page()`): Generates Python code that builds HTML inline — no templates needed
+- **Seed data** (`_generate_seed_data()`): Smart column-type-aware sample data (3 rows per table)
+- **CRUD operations**: List (paginated), Get, Create (with business rule validation), Update, Delete
+- **UI features**: Edit forms, Toggle for boolean columns, Delete with confirmation
 
 ---
 
@@ -1194,24 +1370,27 @@ graph TB
 
 | File | LOC | Purpose |
 |------|-----|---------|
-| `app/main.py` | 350 | FastAPI server, routes, rate limiter |
-| `app/config.py` | 40 | Centralized settings |
-| `app/pipeline/orchestrator.py` | 222 | Pipeline coordinator |
-| `app/pipeline/intent.py` | 45 | Stage 1: NL → Intent IR |
-| `app/pipeline/design.py` | 46 | Stage 2: Intent IR → Architecture IR |
-| `app/pipeline/schema.py` | 188 | Stage 3: Architecture IR → 5-Schema Config |
-| `app/pipeline/refinement.py` | 101 | Stage 4: Validate + Repair loop |
-| `app/pipeline/llm.py` | 400 | DeepSeek client, JSON recovery, token tracking |
-| `app/validation/contracts.py` | 587 | 8 JSON Schema contracts |
-| `app/validation/validator.py` | 298 | 7-layer validation engine |
-| `app/validation/consistency.py` | 424 | Cross-layer consistency checks |
-| `app/validation/hallucination.py` | 117 | Hallucination detector |
-| `app/validation/repair.py` | 515 | 14-strategy repair engine |
-| `app/generation/codegen.py` | 335 | SQL/Python/HTML code generator |
-| `app/generation/validator.py` | 94 | Generated code validator |
-| `app/evaluation/dataset.py` | 195 | 20 evaluation prompts |
-| `app/evaluation/runner.py` | 93 | Benchmark runner |
-| `app/evaluation/metrics.py` | 128 | Metrics collector |
-| `static/index.html` | 201 | Web UI structure |
-| `static/style.css` | 675 | Dark theme styling |
-| `static/app.js` | 456 | Frontend logic, SSE handling |
+| `app/main.py` | 355 | FastAPI server, routes, rate limiter, SSE streaming, ZIP download |
+| `app/config.py` | 42 | Centralized settings (model, pricing, rate limits, repair passes) |
+| `app/pipeline/orchestrator.py` | 230 | Pipeline coordinator, state management, progress callbacks |
+| `app/pipeline/intent.py` | 45 | Stage 1: NL → Intent IR via `structured_call()` |
+| `app/pipeline/design.py` | 46 | Stage 2: Intent IR → Architecture IR via `structured_call()` |
+| `app/pipeline/schema.py` | 192 | Stage 3: Architecture IR → 5-Schema Config (3 parallel workers) |
+| `app/pipeline/refinement.py` | 103 | Stage 4: Validate + Repair loop (max 3 passes, MD5 dedup) |
+| `app/pipeline/llm.py` | 389 | DeepSeek client, 8-strategy JSON recovery, token tracking |
+| `app/validation/contracts.py` | 600 | 8 JSON Schema contracts (Intent IR, Architecture IR, 5 sub-schemas, Config) |
+| `app/validation/validator.py` | 302 | 7-layer validation engine |
+| `app/validation/consistency.py` | 437 | Cross-layer consistency: 6 rules, name normalization, dangling resource detection |
+| `app/validation/hallucination.py` | 117 | Hallucination detector: fuzzy path matching, singularization |
+| `app/validation/repair.py` | 516 | 17-strategy repair engine (3 LLM, 11 local, 3 unresolvable) |
+| `app/generation/codegen.py` | 1,919 | Full-stack code generator: SQL, FastAPI, SQLAlchemy, Pydantic, JWT, templates |
+| `app/generation/validator.py` | 94 | Generated code validator: Python AST, SQLite, HTML structure |
+| `app/runtime/sandbox.py` | 438 | Sandbox: subprocess management, health checks, smoke tests, keep-alive |
+| `app/evaluation/dataset.py` | 195 | 20 evaluation prompts (10 real products + 10 edge cases) |
+| `app/evaluation/runner.py` | 123 | Automated benchmark runner, cost-quality report generation |
+| `app/evaluation/metrics.py` | 432 | MetricsCollector: quality scoring (6 dimensions), cost efficiency, markdown reports |
+| `static/index.html` | 222 | Web UI: prompt input, API key, pipeline progress, JSON viewer, code tabs |
+| `static/style.css` | 728 | Dark theme, responsive layout, stage indicators, animations |
+| `static/app.js` | 618 | Frontend: SSE handling, tab navigation, code display, runtime tests, modify/re-run |
+| `tests/test_core.py` | — | Core unit tests |
+| `tests/test_integration.py` | — | Integration tests |
