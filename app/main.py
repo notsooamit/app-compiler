@@ -118,6 +118,23 @@ class RunCodeResponse(BaseModel):
 # ============================================================
 # Routes
 # ============================================================
+@app.api_route("/sandbox/{port}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def sandbox_proxy(port: int, path: str, request: Request):
+    """Proxy requests to the sandbox app running on localhost:port"""
+    import httpx
+    client = httpx.AsyncClient(timeout=30.0)
+    url = f"http://127.0.0.1:{port}/{path}"
+    try:
+        if request.query_params:
+            url += f"?{request.query_params}"
+        body = await request.body() if request.method in ("POST", "PUT", "PATCH") else None
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        r = await client.request(request.method, url, content=body, headers=headers)
+        return HTMLResponse(r.content, status_code=r.status_code, headers=dict(r.headers))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sandbox unreachable: {str(e)}")
+
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index():
     """Serve the main UI."""

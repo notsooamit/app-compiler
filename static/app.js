@@ -554,12 +554,12 @@ async function runRuntimeTest(config) {
         runtimeSpinner.classList.add('hidden');
 
         if (data.base_url && data.startup_latency_seconds > 0 && data.success !== false) {
-            const liveUrl = data.base_url;
+            const proxyUrl = `/sandbox/${data.port}/`;
             const passed = data.smoke_tests_passed || 0;
             const failed = data.smoke_tests_failed || 0;
             const note = failed > 0 ? ' (auth/admin endpoints expected)' : '';
             const startTime = Date.now();
-            const timeoutMs = 300 * 1000; // 5 minutes
+            const timeoutMs = 300 * 1000;
 
             function updateTimer() {
                 const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -571,35 +571,23 @@ async function runRuntimeTest(config) {
                     timerEl.textContent = `Time left: ${mins}m ${secs}s`;
                     setTimeout(updateTimer, 1000);
                 } else if (timerEl) {
-                    timerEl.textContent = 'App has stopped. Re-run to restart.';
+                    timerEl.textContent = 'App has stopped. Re-run.';
                     timerEl.style.color = 'var(--red)';
                 }
             }
 
-            async function testConnection() {
-                const btn = document.getElementById('testConnBtn');
-                btn.textContent = 'Testing...';
-                btn.disabled = true;
-                try {
-                    const r = await fetch(liveUrl, { mode: 'no-cors' });
-                    btn.textContent = 'App is REACHABLE';
-                    btn.style.background = 'var(--green)';
-                } catch(e) {
-                    btn.textContent = 'Cannot reach app - may have stopped. Re-run.';
-                    btn.style.background = 'var(--red)';
-                }
-                btn.disabled = false;
-            }
-
             runtimeResult.innerHTML = `
                 <span style="color:var(--green);font-weight:600;">
-                    App is LIVE at <a href="${liveUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">${liveUrl}</a>
+                    App is LIVE at <a href="${proxyUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">${proxyUrl}</a>
                 </span>
-                <span id="sandboxTimer" style="color:var(--text2);font-size:0.8rem;display:block;margin-top:4px;"></span>
+                <span style="color:var(--text2);font-size:0.8rem;display:block;margin-top:4px;">
+                    (proxied through main server — same port, no firewall issues)
+                </span>
+                <span id="sandboxTimer" style="color:var(--text2);font-size:0.8rem;display:block;margin-top:2px;"></span>
                 <span style="color:var(--text2);font-size:0.8rem;display:block;">
                     Smoke: ${passed}/${passed+failed} passed${note} · started ${data.startup_latency_seconds || 0}s ago
-                </span>
-                <button id="testConnBtn" style="margin-top:6px;padding:4px 12px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:0.8rem;">Test Connection</button>`;
+                </span>`;
+            setTimeout(updateTimer, 1000);
             setTimeout(updateTimer, 1000);
             setTimeout(() => {
                 const btn = document.getElementById('testConnBtn');

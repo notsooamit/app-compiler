@@ -739,6 +739,15 @@ def _generate_app(config: dict) -> str:
     lines.append("")
     lines.append(f'app = FastAPI(title="{app_name}", version="1.0.0")')
     lines.append("")
+    # CORS: allow browser access from any origin
+    lines.append("from fastapi.middleware.cors import CORSMiddleware")
+    lines.append("app.add_middleware(")
+    lines.append("    CORSMiddleware,")
+    lines.append("    allow_origins=['*'],")
+    lines.append("    allow_methods=['*'],")
+    lines.append("    allow_headers=['*'],")
+    lines.append(")")
+    lines.append("")
 
     # Root route: redirect to first UI page, or Swagger if no pages
     if pages:
