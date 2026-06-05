@@ -315,12 +315,13 @@ async def _start_app(result: RuntimeResult):
 
     try:
         import subprocess as _sp
+        # Use DEVNULL to avoid pipe buffer filling up and blocking the app
         process = _sp.Popen(
             [sys.executable, "-u", app_py],
             cwd=result.temp_dir,
             env=env,
-            stdout=_sp.PIPE,
-            stderr=_sp.PIPE,
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
         )
         return process
     except Exception as e:
