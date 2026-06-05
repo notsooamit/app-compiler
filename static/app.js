@@ -558,13 +558,53 @@ async function runRuntimeTest(config) {
             const passed = data.smoke_tests_passed || 0;
             const failed = data.smoke_tests_failed || 0;
             const note = failed > 0 ? ' (auth/admin endpoints expected)' : '';
+            const startTime = Date.now();
+            const timeoutMs = 300 * 1000; // 5 minutes
+
+            function updateTimer() {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const remaining = Math.max(0, Math.floor(timeoutMs / 1000) - elapsed);
+                const mins = Math.floor(remaining / 60);
+                const secs = remaining % 60;
+                const timerEl = document.getElementById('sandboxTimer');
+                if (timerEl && remaining > 0) {
+                    timerEl.textContent = `Time left: ${mins}m ${secs}s`;
+                    setTimeout(updateTimer, 1000);
+                } else if (timerEl) {
+                    timerEl.textContent = 'App has stopped. Re-run to restart.';
+                    timerEl.style.color = 'var(--red)';
+                }
+            }
+
+            async function testConnection() {
+                const btn = document.getElementById('testConnBtn');
+                btn.textContent = 'Testing...';
+                btn.disabled = true;
+                try {
+                    const r = await fetch(liveUrl, { mode: 'no-cors' });
+                    btn.textContent = 'App is REACHABLE';
+                    btn.style.background = 'var(--green)';
+                } catch(e) {
+                    btn.textContent = 'Cannot reach app - may have stopped. Re-run.';
+                    btn.style.background = 'var(--red)';
+                }
+                btn.disabled = false;
+            }
+
             runtimeResult.innerHTML = `
                 <span style="color:var(--green);font-weight:600;">
                     App is LIVE at <a href="${liveUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">${liveUrl}</a>
                 </span>
-                <span style="color:var(--text2);font-size:0.8rem;display:block;margin-top:4px;">
-                    Smoke: ${passed}/${passed+failed} passed${note} · started ${data.startup_latency_seconds || 0}s ago · 5 min timeout
-                </span>`;
+                <span id="sandboxTimer" style="color:var(--text2);font-size:0.8rem;display:block;margin-top:4px;"></span>
+                <span style="color:var(--text2);font-size:0.8rem;display:block;">
+                    Smoke: ${passed}/${passed+failed} passed${note} · started ${data.startup_latency_seconds || 0}s ago
+                </span>
+                <button id="testConnBtn" style="margin-top:6px;padding:4px 12px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:0.8rem;">Test Connection</button>`;
+            setTimeout(updateTimer, 1000);
+            setTimeout(() => {
+                const btn = document.getElementById('testConnBtn');
+                if (btn) btn.addEventListener('click', testConnection);
+            }, 100);
         } else {
             runtimeResult.innerHTML = `<span style="color:var(--red)">Runtime test failed</span>`;
             runtimeErrors.classList.remove('hidden');

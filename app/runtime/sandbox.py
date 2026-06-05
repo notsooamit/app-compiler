@@ -109,7 +109,7 @@ async def run_generated_app(
     """
     result = RuntimeResult()
     result.port = find_free_port()
-    result.base_url = f"http://127.0.0.1:{result.port}"
+    result.base_url = f"http://localhost:{result.port}"
 
     # Create isolated temp directory
     result.temp_dir = tempfile.mkdtemp(prefix="appgen_")
@@ -172,7 +172,18 @@ async def run_generated_app(
                 result._keep_alive = keep_alive
                 result._temp_dir = result.temp_dir
                 process = None
-                asyncio.create_task(_delayed_cleanup(result))
+                # Verify app is still reachable before returning
+                try:
+                    alive = await _health_check(result.base_url, timeout=3)
+                    if not alive:
+                        result.errors.append("App died after smoke tests — health check failed")
+                        result.success = False
+                except Exception:
+                    pass
+                if result.success:
+                    asyncio.create_task(_delayed_cleanup(result))
+                else:
+                    await _stop_process(result._process)
                 return result
 
         finally:
