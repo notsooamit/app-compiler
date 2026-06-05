@@ -1401,10 +1401,10 @@ def _build_server_page(page: dict, config: dict) -> tuple:
                 html_parts.append(f'        html += f"""<td>{{item.{cname} if item.{cname} is not None else ""}}</td>"""')
         # Action links: Edit + Toggle + Delete
         confirm_js = "return confirm(&#39;Delete?&#39;)"
-        actions_html = f'<a href=\"{route_base}/_edit/{{item.{pk_name}}}\" style=\"color:#3b82f6;text-decoration:none;margin-right:8px\">Edit</a>'
+        actions_html = f'<a href=\"_edit/{{item.{pk_name}}}\" style=\"color:#3b82f6;text-decoration:none;margin-right:8px\">Edit</a>'
         if _bool_cols:
-            actions_html += f' <a href=\"{route_base}/_toggle/{{item.{pk_name}}}\" style=\"color:var(--green);text-decoration:none;margin-right:8px\">Toggle</a>'
-        actions_html += f' <a href=\"{route_base}/_delete/{{item.{pk_name}}}\" style=\"color:var(--red);text-decoration:none\" onclick=\"{confirm_js}\">Delete</a>'
+            actions_html += f' <a href=\"_toggle/{{item.{pk_name}}}\" style=\"color:var(--green);text-decoration:none;margin-right:8px\">Toggle</a>'
+        actions_html += f' <a href=\"_delete/{{item.{pk_name}}}\" style=\"color:var(--red);text-decoration:none\" onclick=\"{confirm_js}\">Delete</a>'
         html_parts.append(f"        html += f'<td>{actions_html}</td>'")
         html_parts.append('        html += """</tr>"""')
         html_parts.append('    html += """</tbody></table>"""')
@@ -1415,7 +1415,7 @@ def _build_server_page(page: dict, config: dict) -> tuple:
     if class_name and form_fields:
         html_parts.append('')
         html_parts.append(f'html += """<div class="form-section"><h3>Add New {_singularize(class_name) if class_name else "Item"}</h3>"""')
-        html_parts.append(f'html += """<form method="post" action="{route_base}">"""')
+        html_parts.append(f'html += """<form method="post" action="">"""')
         for f in form_fields:
             fname = f["name"]
             ftype = f["type"]
@@ -1447,7 +1447,7 @@ def _build_server_page(page: dict, config: dict) -> tuple:
         py_lines.append(f"    if item:")
         py_lines.append(f"        db.delete(item)")
         py_lines.append(f"        db.commit()")
-        py_lines.append(f'    return RedirectResponse(url="{home_url}", status_code=303)')
+        py_lines.append(f'    return RedirectResponse(url="/", status_code=303)')
 
     # Generate EDIT routes (GET shows prefilled form, POST handles update)
     if class_name and form_fields and table_columns:
@@ -1464,7 +1464,7 @@ def _build_server_page(page: dict, config: dict) -> tuple:
         py_lines.append(f'    html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Edit</title>"""')
         py_lines.append(f'    html += """<style>*{{font-family:sans-serif}}body{{background:#f5f5f5;padding:20px}}.container{{max-width:600px;margin:0 auto;background:#fff;padding:20px;border-radius:8px}}h2{{color:#6366f1}}label{{display:block;font-weight:600;margin:8px 0 4px;font-size:13px}}input,textarea{{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px}}button{{background:#6366f1;color:#fff;border:none;padding:10px 24px;border-radius:4px;cursor:pointer;margin-top:12px}}</style>"""')
         py_lines.append(f'    html += """</head><body><div class="container"><h2>Edit Item</h2>"""')
-        py_lines.append(f"    html += f'<form method=\"post\" action=\"{route_base}/_edit/{{item.{pk_name}}}\">'")
+        py_lines.append(f"    html += f'<form method=\"post\" action=\"_edit/{{item.{pk_name}}}\">'")
         for f in form_fields:
             fname = f["name"]
             label = f["label"]
@@ -1478,7 +1478,7 @@ def _build_server_page(page: dict, config: dict) -> tuple:
             else:
                 py_lines.append(f"    html += f'<label>{label}</label><input type=\"text\" name=\"{fname}\" value=\"{{item.{fname} or \"\"}}\">'")
         py_lines.append(f"    html += '<button type=\"submit\">Save Changes</button>'")
-        py_lines.append(f"    html += f' <a href=\"{page.get('route', '/')}\">Cancel</a>'")
+        py_lines.append(f"    html += f' <a href=\".\">Cancel</a>'")
         py_lines.append(f'    html += """</form></div></body></html>"""')
         py_lines.append(f'    return HTMLResponse(html)')
 
@@ -1508,7 +1508,7 @@ def _build_server_page(page: dict, config: dict) -> tuple:
         py_lines.append(f'        return RedirectResponse(url="{page.get("route", "/")}", status_code=303)')
         py_lines.append(f"    except Exception as e:")
         py_lines.append(f"        db.rollback()")
-        py_lines.append(f"        return HTMLResponse(f'<h2>Error: {{e}}</h2><a href=\"{page.get('route', '/')}\">Back</a>', status_code=400)")
+        py_lines.append(f"        return HTMLResponse(f'<h2>Error: {{e}}</h2><a href=\".\">Back</a>', status_code=400)")
 
     # Generate TOGGLE route (flips a boolean column like is_completed)
     if class_name and _bool_cols and table_columns:
@@ -1588,7 +1588,7 @@ def _build_server_page(page: dict, config: dict) -> tuple:
         py_lines.append(f"        return RedirectResponse(url=\"{page.get('route', '/')}\", status_code=303)")
         py_lines.append(f"    except Exception as e:")
         py_lines.append(f"        db.rollback()")
-        py_lines.append(f"        return HTMLResponse(f'<h2>Error: {{e}}</h2><a href=\"{page.get('route', '/')}\">Back</a>', status_code=400)")
+        py_lines.append(f"        return HTMLResponse(f'<h2>Error: {{e}}</h2><a href=\".\">Back</a>', status_code=400)")
 
     return html_parts, py_lines
 
