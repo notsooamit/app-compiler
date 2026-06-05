@@ -553,7 +553,7 @@ async function runRuntimeTest(config) {
         try { data = JSON.parse(rawText); } catch(e) { data = {_parse_error: e.message, _raw: rawText.slice(0,300)}; }
         runtimeSpinner.classList.add('hidden');
 
-        if (data.base_url && data.startup_latency_seconds > 0) {
+        if (data.base_url && data.startup_latency_seconds > 0 && data.success !== false) {
             const liveUrl = data.base_url;
             const passed = data.smoke_tests_passed || 0;
             const failed = data.smoke_tests_failed || 0;

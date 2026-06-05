@@ -172,14 +172,13 @@ async def run_generated_app(
                 result._keep_alive = keep_alive
                 result._temp_dir = result.temp_dir
                 process = None
-                # Verify app is still reachable before returning
-                try:
-                    alive = await _health_check(result.base_url, timeout=3)
-                    if not alive:
-                        result.errors.append("App died after smoke tests — health check failed")
-                        result.success = False
-                except Exception:
-                    pass
+                # Verify process is still alive (poll returns None if running)
+                if result._process.poll() is not None:
+                    result.errors.append(f"App process died (exit code {result._process.returncode})")
+                    result.success = False
+                elif not await _health_check(result.base_url, timeout=5):
+                    result.errors.append("App process running but HTTP check failed")
+                    result.success = False
                 if result.success:
                     asyncio.create_task(_delayed_cleanup(result))
                 else:
